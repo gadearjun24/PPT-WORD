@@ -1,47 +1,79 @@
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pptx import Presentation
-from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.enum.shapes import MSO_SHAPE
 from docx import Document
-from docx.shared import Pt, RGBColor as DocxRGB
+from docx.shared import Pt, RGBColor as DocxRGB, Inches
+from io import BytesIO
 import shutil
 import uuid
+import logging
 from fastapi.middleware.cors import CORSMiddleware
 
+# -----------------------------
+# Logging configuration
+# -----------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# -----------------------------
+# FastAPI app
+# -----------------------------
 app = FastAPI(title="PPTX to Word Converter")
 
-# Enable CORS so your HTML can call the API
+# CORS: allow all origins for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # or your HTML frontend URL
+    allow_origins=["*"],  # or your frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# -----------------------------
 # Helper: Convert pptx RGB to Word RGB
+# -----------------------------
 def pptx_color_to_rgb(color_obj):
     try:
         if color_obj and color_obj.type == 1:  # RGB
             rgb = color_obj.rgb
             return DocxRGB(rgb[0], rgb[1], rgb[2])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Failed to get color: {e}")
     return None
 
+# -----------------------------
+# Endpoint: Convert PPTX to Word
+# -----------------------------
 @app.post("/convert/")
 async def convert_pptx_to_word(file: UploadFile = File(...)):
+    logger.info(f"Received file: {file.filename}")
+
     # Save uploaded file temporarily
     temp_pptx = f"/tmp/{uuid.uuid4()}.pptx"
-    with open(temp_pptx, "wb") as f:
-        shutil.copyfileobj(file.file, f)
+    try:
+        with open(temp_pptx, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        logger.info(f"Saved uploaded PPTX to {temp_pptx}")
+    except Exception as e:
+        logger.error(f"Error saving uploaded file: {e}")
+        return {"error": "Failed to save uploaded file"}
 
-    # Load PPTX
-    prs = Presentation(temp_pptx)
+    # Load presentation
+    try:
+        prs = Presentation(temp_pptx)
+        logger.info(f"Loaded PPTX: {temp_pptx} with {len(prs.slides)} slides")
+    except Exception as e:
+        logger.error(f"Error loading PPTX: {e}")
+        return {"error": "Failed to load PPTX file"}
+
     doc = Document()
 
-    # Detect default font
+    # Detect default font from PPTX
     default_font_name = "Utsaah"
     for slide in prs.slides:
         for shape in slide.shapes:
@@ -57,45 +89,97 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                 break
         if default_font_name != "Utsaah":
             break
+    logger.info(f"Default font detected: {default_font_name}")
 
-    # Extract text
-    for slide in prs.slides:
-        for shape in slide.shapes:
+    # Process slides
+    for slide_index, slide in enumerate(prs.slides):
+        logger.info(f"Processing slide {slide_index+1}/{len(prs.slides)}")
+
+        for shape_index, shape in enumerate(slide.shapes):
+            logger.info(f"Processing shape {shape_index+1}/{len(slide.shapes)} type={shape.shape_type}")
+
+            # -----------------------------
+            # Text boxes
+            # -----------------------------
             if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX or shape.has_text_frame:
-                text_frame = shape.text_frame
-                for paragraph in text_frame.paragraphs:
-                    if not paragraph.text.strip():
-                        continue
-                    p = doc.add_paragraph()
-                    for run in paragraph.runs:
-                        new_run = p.add_run(run.text)
-                        new_run.font.name = default_font_name
-                        new_run.font.size = Pt(14)
-                        new_run.bold = run.font.bold
-                        new_run.italic = run.font.italic
-                        new_run.underline = run.font.underline
-                        rgb = pptx_color_to_rgb(run.font.color)
-                        if rgb:
-                            new_run.font.color.rgb = rgb
-                    p.alignment = paragraph.alignment
+                try:
+                    text_frame = shape.text_frame
+                    for paragraph in text_frame.paragraphs:
+                        if not paragraph.text.strip():
+                            continue
+                        p = doc.add_paragraph()
+                        for run in paragraph.runs:
+                            new_run = p.add_run(run.text)
+                            new_run.font.name = default_font_name
+                            new_run.font.size = Pt(14)
+                            new_run.bold = run.font.bold
+                            new_run.italic = run.font.italic
+                            new_run.underline = run.font.underline
+                            rgb = pptx_color_to_rgb(run.font.color)
+                            if rgb:
+                                new_run.font.color.rgb = rgb
+                        p.alignment = paragraph.alignment
+                except Exception as e:
+                    logger.warning(f"Failed to process text box: {e}")
+
+            # -----------------------------
+            # Tables
+            # -----------------------------
             elif shape.shape_type == MSO_SHAPE_TYPE.TABLE:
-                table = shape.table
-                for row in table.rows:
-                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                    if any(cells):
-                        p = doc.add_paragraph(" | ".join(cells))
-                        for run in p.runs:
-                            run.font.name = default_font_name
-                            run.font.size = Pt(14)
-        # Add two blank lines between slides
+                try:
+                    table = shape.table
+                    word_table = doc.add_table(rows=len(table.rows), cols=len(table.columns))
+                    word_table.style = "Table Grid"
+                    for i, row in enumerate(table.rows):
+                        for j, cell in enumerate(row.cells):
+                            word_table.cell(i, j).text = cell.text
+                    logger.info(f"Table extracted with {len(table.rows)} rows and {len(table.columns)} columns")
+                except Exception as e:
+                    logger.warning(f"Failed to process table: {e}")
+
+            # -----------------------------
+            # Images
+            # -----------------------------
+            elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                try:
+                    image_stream = BytesIO(shape.image.blob)
+                    doc.add_picture(image_stream, width=Inches(4))  # adjust width as needed
+                    logger.info(f"Inserted image from shape {shape_index+1}")
+                except Exception as e:
+                    logger.warning(f"Failed to insert image: {e}")
+
+            # -----------------------------
+            # Charts (as images)
+            # -----------------------------
+            elif shape.shape_type == MSO_SHAPE_TYPE.CHART:
+                try:
+                    chart_image = shape.chart.plots[0].chart_part.chart_space.blob
+                    image_stream = BytesIO(chart_image)
+                    doc.add_picture(image_stream, width=Inches(4))
+                    logger.info(f"Inserted chart as image")
+                except Exception as e:
+                    logger.warning(f"Failed to extract chart: {e}")
+
+        # Add spacing between slides
         doc.add_paragraph("")
         doc.add_paragraph("")
 
-    # Save Word file temporarily
+    # Save Word file
     output_path = f"/tmp/{uuid.uuid4()}.docx"
-    doc.save(output_path)
+    try:
+        doc.save(output_path)
+        logger.info(f"Saved converted Word file: {output_path}")
+    except Exception as e:
+        logger.error(f"Failed to save Word file: {e}")
+        return {"error": "Failed to save Word file"}
 
     # Return file for download
-    f = open(output_path, "rb")
+    try:
+        f = open(output_path, "rb")
+        headers = {"Content-Disposition": 'attachment; filename="converted.docx"'}
+        return StreamingResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)
+    except Exception as e:
+        logger.error(f"Failed to return Word file: {e}")
+        return {"error": "Failed to return Word file"}    f = open(output_path, "rb")
     headers = {"Content-Disposition": 'attachment; filename="converted.docx"'}
     return StreamingResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)

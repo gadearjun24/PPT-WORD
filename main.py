@@ -51,24 +51,24 @@ def pptx_color_to_rgb(color_obj):
 # -----------------------------
 @app.post("/convert/")
 async def convert_pptx_to_word(file: UploadFile = File(...)):
-    logger.info(f"Received file: {file.filename}")
+    logger.info(f"📁 Received file: {file.filename}")
 
     # Save uploaded file temporarily
     temp_pptx = f"/tmp/{uuid.uuid4()}.pptx"
     try:
         with open(temp_pptx, "wb") as f:
             shutil.copyfileobj(file.file, f)
-        logger.info(f"Saved uploaded PPTX to {temp_pptx}")
+        logger.info(f"✅ Saved uploaded PPTX to {temp_pptx}")
     except Exception as e:
-        logger.error(f"Error saving uploaded file: {e}")
+        logger.error(f"❌ Error saving uploaded file: {e}")
         return {"error": "Failed to save uploaded file"}
 
     # Load presentation
     try:
         prs = Presentation(temp_pptx)
-        logger.info(f"Loaded PPTX: {temp_pptx} with {len(prs.slides)} slides")
+        logger.info(f"✅ Loaded PPTX with {len(prs.slides)} slides")
     except Exception as e:
-        logger.error(f"Error loading PPTX: {e}")
+        logger.error(f"❌ Error loading PPTX: {e}")
         return {"error": "Failed to load PPTX file"}
 
     doc = Document()
@@ -89,14 +89,14 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                 break
         if default_font_name != "Utsaah":
             break
-    logger.info(f"Default font detected: {default_font_name}")
+    logger.info(f"🖋️ Default font detected: {default_font_name}")
 
     # Process slides
     for slide_index, slide in enumerate(prs.slides):
-        logger.info(f"Processing slide {slide_index+1}/{len(prs.slides)}")
+        logger.info(f"📄 Processing slide {slide_index + 1}/{len(prs.slides)}")
 
         for shape_index, shape in enumerate(slide.shapes):
-            logger.info(f"Processing shape {shape_index+1}/{len(slide.shapes)} type={shape.shape_type}")
+            logger.info(f"🔹 Shape {shape_index + 1}/{len(slide.shapes)} type={shape.shape_type}")
 
             # -----------------------------
             # Text boxes
@@ -120,7 +120,7 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                                 new_run.font.color.rgb = rgb
                         p.alignment = paragraph.alignment
                 except Exception as e:
-                    logger.warning(f"Failed to process text box: {e}")
+                    logger.warning(f"⚠️ Failed to process text box: {e}")
 
             # -----------------------------
             # Tables
@@ -132,10 +132,10 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                     word_table.style = "Table Grid"
                     for i, row in enumerate(table.rows):
                         for j, cell in enumerate(row.cells):
-                            word_table.cell(i, j).text = cell.text
-                    logger.info(f"Table extracted with {len(table.rows)} rows and {len(table.columns)} columns")
+                            word_table.cell(i, j).text = cell.text.strip()
+                    logger.info(f"✅ Table extracted ({len(table.rows)}x{len(table.columns)})")
                 except Exception as e:
-                    logger.warning(f"Failed to process table: {e}")
+                    logger.warning(f"⚠️ Failed to process table: {e}")
 
             # -----------------------------
             # Images
@@ -143,22 +143,23 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
             elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 try:
                     image_stream = BytesIO(shape.image.blob)
-                    doc.add_picture(image_stream, width=Inches(4))  # adjust width as needed
-                    logger.info(f"Inserted image from shape {shape_index+1}")
+                    doc.add_picture(image_stream, width=Inches(4))
+                    logger.info(f"🖼️ Inserted image from shape {shape_index + 1}")
                 except Exception as e:
-                    logger.warning(f"Failed to insert image: {e}")
+                    logger.warning(f"⚠️ Failed to insert image: {e}")
 
             # -----------------------------
             # Charts (as images)
             # -----------------------------
             elif shape.shape_type == MSO_SHAPE_TYPE.CHART:
                 try:
-                    chart_image = shape.chart.plots[0].chart_part.chart_space.blob
-                    image_stream = BytesIO(chart_image)
+                    chart_part = shape.chart.plots[0].chart_part
+                    chart_blob = chart_part.chart_space.blob
+                    image_stream = BytesIO(chart_blob)
                     doc.add_picture(image_stream, width=Inches(4))
-                    logger.info(f"Inserted chart as image")
+                    logger.info(f"📊 Inserted chart as image")
                 except Exception as e:
-                    logger.warning(f"Failed to extract chart: {e}")
+                    logger.warning(f"⚠️ Failed to extract chart: {e}")
 
         # Add spacing between slides
         doc.add_paragraph("")
@@ -168,18 +169,21 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
     output_path = f"/tmp/{uuid.uuid4()}.docx"
     try:
         doc.save(output_path)
-        logger.info(f"Saved converted Word file: {output_path}")
+        logger.info(f"💾 Saved converted Word file: {output_path}")
     except Exception as e:
-        logger.error(f"Failed to save Word file: {e}")
+        logger.error(f"❌ Failed to save Word file: {e}")
         return {"error": "Failed to save Word file"}
 
     # Return file for download
     try:
         f = open(output_path, "rb")
-        headers = {"Content-Disposition": 'attachment; filename="converted.docx"'}
-        return StreamingResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)
+        headers = {"Content-Disposition": 'attachment; filename=\"converted.docx\"'}
+        logger.info(f"✅ Conversion successful, returning file.")
+        return StreamingResponse(
+            f,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers=headers
+        )
     except Exception as e:
-        logger.error(f"Failed to return Word file: {e}")
-        return {"error": "Failed to return Word file"}    f = open(output_path, "rb")
-    headers = {"Content-Disposition": 'attachment; filename="converted.docx"'}
-    return StreamingResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)
+        logger.error(f"❌ Failed to return Word file: {e}")
+        return {"error": "Failed to return Word file"}

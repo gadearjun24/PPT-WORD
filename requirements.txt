@@ -1,5 +1,17 @@
+# --- Core FastAPI + Uvicorn ---
 fastapi==0.110.0
 uvicorn==0.23.2
+
+# --- File Uploads ---
 python-multipart==0.0.6
+aiofiles==24.1.0
+
+# --- PPTX & DOCX Processing ---
 python-pptx==0.6.21
-python-docx>=1.0.0
+python-docx==1.2.0
+lxml==5.3.0
+pillow==11.0.0  # needed for images inside PPTX
+
+# --- Optional (but helps with debugging & CORS) ---
+starlette==0.38.2
+typing-extensions>=4.8.0

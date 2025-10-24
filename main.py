@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import StreamingResponse
 from pptx import Presentation
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -7,26 +7,18 @@ from docx import Document
 from docx.shared import Pt, RGBColor as DocxRGB
 import shutil
 import uuid
-import os
 from fastapi.middleware.cors import CORSMiddleware
-
-
-
-
-
 
 app = FastAPI(title="PPTX to Word Converter")
 
-
+# Enable CORS so your HTML can call the API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # allow all origins; you can restrict to your frontend URL
+    allow_origins=["*"],  # or your HTML frontend URL
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
 
 # Helper: Convert pptx RGB to Word RGB
 def pptx_color_to_rgb(color_obj):
@@ -49,7 +41,7 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
     prs = Presentation(temp_pptx)
     doc = Document()
 
-    # Detect default font from PPTX
+    # Detect default font
     default_font_name = "Utsaah"
     for slide in prs.slides:
         for shape in slide.shapes:
@@ -66,7 +58,7 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
         if default_font_name != "Utsaah":
             break
 
-    # Extract text and format
+    # Extract text
     for slide in prs.slides:
         for shape in slide.shapes:
             if shape.shape_type == MSO_SHAPE_TYPE.TEXT_BOX or shape.has_text_frame:
@@ -82,13 +74,10 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                         new_run.bold = run.font.bold
                         new_run.italic = run.font.italic
                         new_run.underline = run.font.underline
-
                         rgb = pptx_color_to_rgb(run.font.color)
                         if rgb:
                             new_run.font.color.rgb = rgb
-
                     p.alignment = paragraph.alignment
-
             elif shape.shape_type == MSO_SHAPE_TYPE.TABLE:
                 table = shape.table
                 for row in table.rows:
@@ -98,14 +87,15 @@ async def convert_pptx_to_word(file: UploadFile = File(...)):
                         for run in p.runs:
                             run.font.name = default_font_name
                             run.font.size = Pt(14)
-
-        # Add two new lines after each slide
+        # Add two blank lines between slides
         doc.add_paragraph("")
         doc.add_paragraph("")
 
-    # Save Word file
+    # Save Word file temporarily
     output_path = f"/tmp/{uuid.uuid4()}.docx"
     doc.save(output_path)
 
     # Return file for download
-    return FileResponse(output_path, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", filename="converted.docx")
+    f = open(output_path, "rb")
+    headers = {"Content-Disposition": 'attachment; filename="converted.docx"'}
+    return StreamingResponse(f, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)

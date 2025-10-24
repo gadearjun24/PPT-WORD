@@ -8,8 +8,25 @@ from docx.shared import Pt, RGBColor as DocxRGB
 import shutil
 import uuid
 import os
+from fastapi.middleware.cors import CORSMiddleware
+
+
+
+
+
 
 app = FastAPI(title="PPTX to Word Converter")
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # allow all origins; you can restrict to your frontend URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 
 # Helper: Convert pptx RGB to Word RGB
 def pptx_color_to_rgb(color_obj):

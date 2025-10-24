@@ -10,8 +10,10 @@ aiofiles==24.1.0
 python-pptx==0.6.21
 python-docx==1.2.0
 lxml==5.3.0
-pillow==11.0.0  # needed for images inside PPTX
+pillow==11.0.0  # needed for images in PPTX
 
-# --- Optional (but helps with debugging & CORS) ---
-starlette==0.38.2
+# --- Compatible Starlette Version ---
+starlette==0.36.3
+
+# --- Typing & Utils ---
 typing-extensions>=4.8.0

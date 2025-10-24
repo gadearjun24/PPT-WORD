@@ -9,12 +9,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
-from pptx.util import Inches
 
 from docx import Document
-from docx.shared import Pt, RGBColor as DocxRGB
+from docx.shared import Pt, RGBColor as DocxRGB, Inches
 
 import matplotlib.pyplot as plt
+from PIL import Image, ImageDraw, ImageFont
 
 # -------------------------
 # Logging
@@ -25,11 +25,11 @@ logger = logging.getLogger(__name__)
 # -------------------------
 # FastAPI app
 # -------------------------
-app = FastAPI(title="PPTX → Word Converter (continuous mode)")
+app = FastAPI(title="PPTX -> Word Converter (Full with Shapes)")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],    # restrict in prod if needed
     allow_methods=["*"],
     allow_headers=["*"],
     allow_credentials=True,
@@ -40,36 +40,99 @@ app.add_middleware(
 # -------------------------
 def pptx_color_to_rgb(color_obj):
     try:
-        if color_obj and color_obj.type == 1:
+        if color_obj and color_obj.type == 1:  # RGB
             rgb = color_obj.rgb
             return DocxRGB(rgb[0], rgb[1], rgb[2])
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"pptx_color_to_rgb: {e}")
     return None
 
 def safe_get_text(shape):
+    """Return text from a shape if available in a safe way."""
     try:
         if hasattr(shape, "text"):
             return shape.text or ""
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"safe_get_text: {e}")
     return ""
 
+def save_stream_to_file(stream_bytes: bytes, ext: str = "png"):
+    """Save bytes to a temporary file and return path."""
+    path = f"/tmp/{uuid.uuid4()}.{ext}"
+    with open(path, "wb") as f:
+        f.write(stream_bytes)
+    return path
+
+def render_chart_from_chart_data(chart):
+    """Render chart via matplotlib using chart_data."""
+    try:
+        chart_data = chart.chart_data
+    except Exception as e:
+        raise RuntimeError(f"No chart_data available: {e}")
+
+    # categories (x-axis)
+    try:
+        categories = list(chart_data.categories)
+        categories = [str(c) for c in categories]
+    except Exception:
+        categories = None
+
+    # series
+    series_list = []
+    try:
+        for s in chart_data.series:
+            label = s.name if hasattr(s, "name") else None
+            values = list(s.values)
+            series_list.append((label, values))
+    except Exception:
+        raise RuntimeError("Failed to read series from chart_data")
+
+    if not series_list:
+        raise RuntimeError("No series data found in chart_data")
+
+    # Figure
+    fig, ax = plt.subplots(figsize=(6, 4))
+    try:
+        if len(series_list) == 1:
+            label, values = series_list[0]
+            if "pie" in str(chart.chart_type).lower():
+                ax.pie(values, labels=categories if categories else None, autopct="%1.1f%%")
+            elif "bar" in str(chart.chart_type).lower() or categories is not None:
+                ax.bar(categories if categories else list(range(len(values))), values, label=label)
+                if label:
+                    ax.legend()
+                ax.set_xticklabels(categories if categories else [str(i) for i in range(len(values))], rotation=45, ha="right")
+            else:
+                ax.plot(categories if categories else list(range(len(values))), values, marker="o", label=label)
+                ax.legend()
+        else:
+            x = range(len(series_list[0][1]))
+            width = 0.8 / max(1, len(series_list))
+            for idx, (label, values) in enumerate(series_list):
+                pos = [xi + (idx - len(series_list)/2) * width + width/2 for xi in x]
+                ax.bar(pos, values, width=width, label=(label or f"Series {idx+1}"))
+            ax.set_xticks(x)
+            if categories:
+                ax.set_xticklabels(categories, rotation=45, ha="right")
+            ax.legend()
+    except Exception as e:
+        plt.close(fig)
+        raise RuntimeError(f"Failed to render chart via matplotlib: {e}")
+
+    plt.tight_layout()
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf.read()
+
 def extract_image_from_shape(shape):
-    """Try to extract image bytes from shape."""
+    """Try to extract image from shape."""
     try:
-        if hasattr(shape, "image") and shape.image:
+        if hasattr(shape, "image") and shape.image is not None:
             return shape.image.blob
-    except Exception:
+    except:
         pass
-
-    try:
-        pic = getattr(shape, "pic", None)
-        if pic is not None and hasattr(pic, "image"):
-            return pic.image.blob
-    except Exception:
-        pass
-
     try:
         blip = shape.element.xpath(".//a:blip")
         if blip:
@@ -77,30 +140,70 @@ def extract_image_from_shape(shape):
             rel = shape.part.related_parts.get(rId)
             if rel:
                 return rel.blob
-    except Exception:
+    except:
         pass
-
     raise RuntimeError("No image found in shape")
 
-def render_chart_from_chart_data(chart):
-    """Render chart data as matplotlib fallback."""
+def draw_shape_as_image(shape):
+    """Draw shape (rect, ellipse, arrow) with fill, border, and text."""
+    scale = 2
+    width = int(shape.width.pt * scale)
+    height = int(shape.height.pt * scale)
+
+    img = Image.new("RGBA", (width, height), (255,255,255,0))
+    draw = ImageDraw.Draw(img)
+
+    # Fill color
+    fill_color = (255,255,255,0)
     try:
-        data = chart.chart_data
-        categories = [str(c) for c in data.categories] if data.categories else []
-        fig, ax = plt.subplots(figsize=(6, 4))
-        for s in data.series:
-            values = list(s.values)
-            ax.plot(categories if categories else range(len(values)), values, marker="o", label=s.name)
-        ax.legend()
-        ax.set_title("Chart Rendered (fallback)")
-        plt.tight_layout()
-        buf = BytesIO()
-        fig.savefig(buf, format="png", dpi=150)
-        plt.close(fig)
-        buf.seek(0)
-        return buf.read()
-    except Exception as e:
-        raise RuntimeError(f"Failed to render chart: {e}")
+        if shape.fill.type == 1:
+            fc = shape.fill.fore_color.rgb
+            fill_color = (fc[0], fc[1], fc[2], 255)
+    except: pass
+
+    # Border color
+    border_color = (0,0,0,255)
+    border_width = 2
+    try:
+        if shape.line.color.type == 1:
+            lc = shape.line.color.rgb
+            border_color = (lc[0], lc[1], lc[2], 255)
+        border_width = int(shape.line.width.pt*scale)
+    except: pass
+
+    stype = shape.shape_type
+    if stype in [MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.RECTANGLE, MSO_SHAPE_TYPE.ROUNDED_RECTANGLE]:
+        draw.rectangle([(0,0),(width,height)], fill=fill_color, outline=border_color, width=border_width)
+    elif stype in [MSO_SHAPE_TYPE.ELLIPSE]:
+        draw.ellipse([(0,0),(width,height)], fill=fill_color, outline=border_color, width=border_width)
+    elif stype in [MSO_SHAPE_TYPE.ARROW, MSO_SHAPE_TYPE.CALLOUT]:
+        draw.polygon([(0, height//2),(width-10,0),(width,height//2),(width-10,height)], fill=fill_color, outline=border_color)
+
+    # Text inside shape
+    if hasattr(shape, "text_frame") and shape.has_text_frame:
+        text = shape.text_frame.text.strip()
+        if text:
+            try:
+                run = shape.text_frame.paragraphs[0].runs[0]
+                font_name = run.font.name or "Arial"
+                font_size = int((run.font.size.pt if run.font.size else 14)*scale)
+                color = run.font.color.rgb
+                text_color = (color[0],color[1],color[2],255) if color else (0,0,0,255)
+            except:
+                font_name, font_size, text_color = "Arial", 14, (0,0,0,255)
+            try:
+                font = ImageFont.truetype(f"{font_name}.ttf", font_size)
+            except:
+                font = ImageFont.load_default()
+            bbox = draw.textbbox((0,0), text, font=font)
+            text_x = (width - (bbox[2]-bbox[0]))//2
+            text_y = (height - (bbox[3]-bbox[1]))//2
+            draw.text((text_x,text_y), text, fill=text_color, font=font)
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
 
 # -------------------------
 # Main endpoint
@@ -111,131 +214,125 @@ async def convert(file: UploadFile = File(...)):
         logger.info(f"Received file: {file.filename}")
         content = await file.read()
         pptx_path = f"/tmp/{uuid.uuid4()}.pptx"
-        with open(pptx_path, "wb") as f:
-            f.write(content)
+        with open(pptx_path,"wb") as f: f.write(content)
+        logger.info(f"Saved PPTX to {pptx_path}")
 
         prs = Presentation(pptx_path)
         doc = Document()
 
-        # Detect font
-        default_font = "Utsaah"
+        # Detect default font
+        default_font_name = "Utsaah"
         for slide in prs.slides:
             for shape in slide.shapes:
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
-                        for run in para.runs:
-                            if run.font.name:
-                                default_font = run.font.name
-                                break
-                        if default_font != "Utsaah":
-                            break
-                if default_font != "Utsaah":
-                    break
-            if default_font != "Utsaah":
-                break
+                try:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            for run in para.runs:
+                                if run.font.name:
+                                    default_font_name = run.font.name
+                                    break
+                            if default_font_name!="Utsaah": break
+                except: continue
+            if default_font_name!="Utsaah": break
+        logger.info(f"Default font detected: {default_font_name}")
 
-        logger.info(f"Using default font: {default_font}")
-
-        # -----------------------------
-        # Process slides continuously
-        # -----------------------------
+        # Process slides
         for s_i, slide in enumerate(prs.slides, start=1):
-            logger.info(f"Slide {s_i}/{len(prs.slides)}")
+            logger.info(f"Processing slide {s_i}/{len(prs.slides)}")
 
-            # Optional: add slide header (not page break)
-            doc.add_paragraph(f"--- Slide {s_i} ---").runs[0].bold = True
+            for sh_i, shape in enumerate(slide.shapes, start=1):
+                logger.info(f"Shape {sh_i}/{len(slide.shapes)} type={shape.shape_type}")
 
-            for shape in slide.shapes:
-                shape_type = shape.shape_type
-
-                # TEXT
-                if shape.has_text_frame:
-                    for para in shape.text_frame.paragraphs:
-                        if not para.text.strip():
-                            continue
-                        p = doc.add_paragraph()
-                        for run in para.runs:
-                            r = p.add_run(run.text)
-                            r.font.name = default_font
-                            r.font.size = Pt(14)
-                            r.bold = run.font.bold
-                            r.italic = run.font.italic
-                            rgb = pptx_color_to_rgb(run.font.color)
-                            if rgb:
-                                r.font.color.rgb = rgb
-
-                # TABLE
-                elif shape_type == MSO_SHAPE_TYPE.TABLE:
+                # Text
+                text = safe_get_text(shape).strip()
+                if text and hasattr(shape, "text_frame") and shape.has_text_frame:
                     try:
+                        for para in shape.text_frame.paragraphs:
+                            if not para.text.strip(): continue
+                            p = doc.add_paragraph()
+                            for run in para.runs:
+                                r = p.add_run(run.text)
+                                try:
+                                    r.font.name = default_font_name
+                                    r.font.size = Pt(14)
+                                    r.bold = run.font.bold
+                                    r.italic = run.font.italic
+                                    r.underline = run.font.underline
+                                    rgb = pptx_color_to_rgb(run.font.color)
+                                    if rgb: r.font.color.rgb = rgb
+                                except: pass
+                    except:
+                        doc.add_paragraph(text)
+
+                # Table
+                try:
+                    if shape.shape_type == MSO_SHAPE_TYPE.TABLE:
                         table = shape.table
                         word_table = doc.add_table(rows=len(table.rows), cols=len(table.columns))
                         word_table.style = "Table Grid"
-                        for r_i, row in enumerate(table.rows):
-                            for c_i, cell in enumerate(row.cells):
-                                word_table.cell(r_i, c_i).text = cell.text.strip()
-                        doc.add_paragraph("")  # spacing after table
-                    except Exception as e:
-                        logger.warning(f"Table failed: {e}")
+                        for r_idx, row in enumerate(table.rows):
+                            for c_idx, cell in enumerate(row.cells):
+                                word_table.cell(r_idx, c_idx).text = cell.text.strip()
+                except: pass
 
-                # IMAGE
-                elif shape_type == MSO_SHAPE_TYPE.PICTURE or "blip" in str(shape.element.xml):
-                    try:
-                        img_bytes = extract_image_from_shape(shape)
-                        doc.add_picture(BytesIO(img_bytes), width=Inches(4))
-                        doc.add_paragraph("")  # spacing
-                    except Exception as e:
-                        logger.warning(f"Image extraction failed: {e}")
-
-                # CHART
-                elif hasattr(shape, "chart"):
-                    try:
+                # Image
+                try:
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE or hasattr(shape,"image") or "blip" in str(shape.element.xml):
                         try:
-                            part = shape.chart.chart_part
-                            blob = part.chart_space.blob
-                            doc.add_picture(BytesIO(blob), width=Inches(5))
-                        except Exception:
-                            # fallback to rendering
-                            img = render_chart_from_chart_data(shape.chart)
-                            doc.add_picture(BytesIO(img), width=Inches(5))
-                        doc.add_paragraph("")
-                    except Exception as e:
-                        logger.warning(f"Chart failed: {e}")
+                            img_bytes = extract_image_from_shape(shape)
+                            doc.add_picture(BytesIO(img_bytes), width=Inches(4))
+                        except: pass
+                except: pass
 
-                # SHAPE (Rectangles, circles, etc.)
-                elif shape_type in [
-                    MSO_SHAPE_TYPE.AUTO_SHAPE,
-                    MSO_SHAPE_TYPE.FREEFORM,
-                    MSO_SHAPE_TYPE.GROUP,
-                ]:
-                    try:
-                        shape_name = getattr(shape, "name", "Shape")
-                        doc.add_paragraph(f"[Shape detected: {shape_name}]")
-                    except Exception:
-                        doc.add_paragraph("[Shape detected]")
+                # Chart
+                try:
+                    if hasattr(shape,"chart"):
+                        chart_inserted=False
+                        try:
+                            chart_part = getattr(shape.chart,"chart_part",None)
+                            if chart_part:
+                                img_stream = BytesIO(chart_part.chart_space.blob)
+                                doc.add_picture(img_stream, width=Inches(5))
+                                chart_inserted=True
+                        except: pass
+                        if not chart_inserted:
+                            try:
+                                img_bytes = render_chart_from_chart_data(shape.chart)
+                                doc.add_picture(BytesIO(img_bytes), width=Inches(5))
+                                chart_inserted=True
+                            except:
+                                doc.add_paragraph("[Chart could not be rendered]")
+                except: pass
 
-            # Add 2 blank lines between slides (instead of page break)
+                # Shapes
+                try:
+                    if shape.shape_type in [MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.ELLIPSE,
+                                            MSO_SHAPE_TYPE.ARROW, MSO_SHAPE_TYPE.CALLOUT,
+                                            MSO_SHAPE_TYPE.ROUNDED_RECTANGLE, MSO_SHAPE_TYPE.RECTANGLE]:
+                        img_stream = draw_shape_as_image(shape)
+                        doc.add_picture(img_stream, width=Inches(4))
+                except: pass
+
+            # Slide separation: 2 blank lines
             doc.add_paragraph("")
             doc.add_paragraph("")
 
-        # Save and return
+        # Save Word
         out_path = f"/tmp/{uuid.uuid4()}.docx"
         doc.save(out_path)
+        logger.info(f"Saved Word to {out_path}")
 
         def iterfile():
-            with open(out_path, "rb") as f:
-                yield from f
+            with open(out_path,"rb") as f: yield from f
 
-        return StreamingResponse(
-            iterfile(),
-            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            headers={"Content-Disposition": f'attachment; filename="{os.path.splitext(file.filename)[0]}.docx"'},
-        )
+        return StreamingResponse(iterfile(),
+                                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                 headers={"Content-Disposition": f'attachment; filename="{os.path.splitext(file.filename)[0]}.docx"'})
 
     except Exception as e:
         logger.exception("Conversion failed")
-        return JSONResponse(content={"error": str(e)}, status_code=500)
+        return JSONResponse({"error": str(e)}, status_code=500)
 
-
+# Health check
 @app.get("/")
-def health():
-    return {"status": "ok"}
+def health(): return {"status":"ok"}

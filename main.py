@@ -18,6 +18,8 @@ from docx.oxml.ns import nsdecls
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 import tempfile
+import unicodedata, re
+
 
 # -------------------------
 # Logging
@@ -41,6 +43,11 @@ app.add_middleware(
 # -------------------------
 # Helpers
 # -------------------------
+
+def safe_filename(name: str) -> str:
+    name = unicodedata.normalize("NFKD", name)
+    name = re.sub(r"[^\w\-_. ]", "_", name)
+    return name.strip() or "converted"
 
 EMU_PER_INCH = 914400
 def emu_to_inches(emu): return emu / EMU_PER_INCH
@@ -81,12 +88,16 @@ def render_shape_to_image(shape):
 def add_page_border(doc):
     """Add a double-line border around each page."""
     for section in doc.sections:
+        section.top_margin = Inches(0.8)
+        section.bottom_margin = Inches(0.8)
+        section.left_margin = Inches(0.8)
+        section.right_margin = Inches(0.8)
         pgBorders = parse_xml(r'''
         <w:pgBorders %s>
-            <w:top w:val="double" w:sz="12" w:space="24" w:color="000000"/>
-            <w:left w:val="double" w:sz="12" w:space="24" w:color="000000"/>
-            <w:bottom w:val="double" w:sz="12" w:space="24" w:color="000000"/>
-            <w:right w:val="double" w:sz="12" w:space="24" w:color="000000"/>
+            <w:top w:val="double" w:sz="6" w:space="24" w:color="000000"/>
+            <w:left w:val="double" w:sz="6" w:space="24" w:color="000000"/>
+            <w:bottom w:val="double" w:sz="6" w:space="24" w:color="000000"/>
+            <w:right w:val="double" w:sz="6" w:space="24" w:color="000000"/>
         </w:pgBorders>
         ''' % nsdecls('w'))
         section._sectPr.append(pgBorders)
@@ -264,7 +275,11 @@ def draw_shape_as_image(shape):
 @app.post("/convert/")
 async def convert(file: UploadFile = File(...),slide_separator: int = 0):
     try:
-        logger.info(f"Received file: {file.filename}")
+        original_filename = file.filename or "uploaded.pptx"
+        safe_name = safe_filename(os.path.splitext(original_filename)[0])
+
+        logger.info(f"Received file: {original_filename.encode('utf-8', 'ignore').decode()}")
+        
         content = await file.read()
         pptx_path = f"/tmp/{uuid.uuid4()}.pptx"
         with open(pptx_path,"wb") as f: f.write(content)
@@ -364,7 +379,7 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
 
                 # Shapes
                 try:
-                    if shape.shape_type in [MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.ELLIPSE,
+                    if shape.shape_type in [MSO_SHAPE_TYPE.AUTO_SHAPE,
                                             MSO_SHAPE_TYPE.ARROW, MSO_SHAPE_TYPE.CALLOUT,
                                             MSO_SHAPE_TYPE.ROUNDED_RECTANGLE, MSO_SHAPE_TYPE.RECTANGLE]:
                         img_path, w_in, h_in = render_shape_to_image(shape)
@@ -398,10 +413,13 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
         def iterfile():
             with open(out_path,"rb") as f: yield from f
 
-        return StreamingResponse(iterfile(),
-                                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                 headers={"Content-Disposition": f'attachment; filename="{os.path.splitext(file.filename)[0]}.docx"'})
-
+        return StreamingResponse(
+            iterfile(),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}.docx"; filename*=UTF-8\'\'{safe_name}.docx'
+            },
+        )
     except Exception as e:
         logger.exception("Conversion failed")
         return JSONResponse({"error": str(e)}, status_code=500)

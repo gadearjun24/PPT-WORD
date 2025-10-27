@@ -12,9 +12,12 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 from docx import Document
 from docx.shared import Pt, RGBColor as DocxRGB, Inches
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
 
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
+import tempfile
 
 # -------------------------
 # Logging
@@ -38,6 +41,56 @@ app.add_middleware(
 # -------------------------
 # Helpers
 # -------------------------
+
+EMU_PER_INCH = 914400
+def emu_to_inches(emu): return emu / EMU_PER_INCH
+
+def render_shape_to_image(shape):
+    """Draw PPT shape (rect/ellipse/triangle) as an image with text."""
+    width_in = emu_to_inches(shape.width)
+    height_in = emu_to_inches(shape.height)
+    img_w, img_h = int(width_in * 300), int(height_in * 300)
+    img = Image.new("RGB", (img_w, img_h), "white")
+    draw = ImageDraw.Draw(img)
+
+    # fill color
+    fill_color = "#cccccc"
+    try:
+        if shape.fill and shape.fill.fore_color.type == 1:
+            rgb = shape.fill.fore_color.rgb
+            fill_color = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+    except Exception:
+        pass
+
+    # draw border + fill
+    draw.rectangle([0, 0, img_w - 2, img_h - 2], fill=fill_color, outline="black", width=5)
+
+    # add shape text
+    try:
+        if shape.has_text_frame and shape.text.strip():
+            text = shape.text.strip()
+            font = ImageFont.load_default()
+            draw.text((20, img_h / 2.5), text, fill="black", font=font)
+    except Exception as e:
+        logger.debug(f"Shape text draw failed: {e}")
+
+    tmp_img = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+    img.save(tmp_img.name)
+    return tmp_img.name, width_in, height_in
+
+def add_page_border(doc):
+    """Add a double-line border around each page."""
+    for section in doc.sections:
+        pgBorders = parse_xml(r'''
+        <w:pgBorders %s>
+            <w:top w:val="double" w:sz="12" w:space="24" w:color="000000"/>
+            <w:left w:val="double" w:sz="12" w:space="24" w:color="000000"/>
+            <w:bottom w:val="double" w:sz="12" w:space="24" w:color="000000"/>
+            <w:right w:val="double" w:sz="12" w:space="24" w:color="000000"/>
+        </w:pgBorders>
+        ''' % nsdecls('w'))
+        section._sectPr.append(pgBorders)
+
 def pptx_color_to_rgb(color_obj):
     try:
         if color_obj and color_obj.type == 1:  # RGB
@@ -209,7 +262,7 @@ def draw_shape_as_image(shape):
 # Main endpoint
 # -------------------------
 @app.post("/convert/")
-async def convert(file: UploadFile = File(...)):
+async def convert(file: UploadFile = File(...),slide_separator: int = 0):
     try:
         logger.info(f"Received file: {file.filename}")
         content = await file.read()
@@ -272,7 +325,12 @@ async def convert(file: UploadFile = File(...)):
                         word_table.style = "Table Grid"
                         for r_idx, row in enumerate(table.rows):
                             for c_idx, cell in enumerate(row.cells):
-                                word_table.cell(r_idx, c_idx).text = cell.text.strip()
+                                txt = cell.text.strip()
+                                p = word_table.cell(r_idx, c_idx).paragraphs[0]
+                                run = p.runs[0] if p.runs else p.add_run(txt)
+                                run.font.size = Pt(14)
+                                run.font.name = default_font_name
+
                 except: pass
 
                 # Image
@@ -309,16 +367,26 @@ async def convert(file: UploadFile = File(...)):
                     if shape.shape_type in [MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.ELLIPSE,
                                             MSO_SHAPE_TYPE.ARROW, MSO_SHAPE_TYPE.CALLOUT,
                                             MSO_SHAPE_TYPE.ROUNDED_RECTANGLE, MSO_SHAPE_TYPE.RECTANGLE]:
-                        img_stream = draw_shape_as_image(shape)
-                        doc.add_picture(img_stream, width=Inches(4))
-                except: pass
+                        img_path, w_in, h_in = render_shape_to_image(shape)
+                        doc.add_picture(img_path, width=Inches(w_in), height=Inches(h_in))
+                        logger.info(f"Rendered and inserted shape: {shape.shape_type}")
+                except Exception as e:
+                    logger.warning(f"Shape render failed: {e}")
 
             # Slide separation: 2 blank lines
             doc.add_paragraph("")
             doc.add_paragraph("")
+            # Handle slide separation logic
+            if slide_separator == -1:
+                doc.add_page_break()
+            else:
+                line_count = slide_separator if slide_separator > 0 else 2
+                for _ in range(line_count):
+                    doc.add_paragraph("")
 
         # Save Word
         out_path = f"/tmp/{uuid.uuid4()}.docx"
+        add_page_border(doc)
         doc.save(out_path)
         logger.info(f"Saved Word to {out_path}")
 

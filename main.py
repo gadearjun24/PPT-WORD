@@ -425,5 +425,16 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 # Health check
-@app.get("/")
+@app.get("/health")
 def health(): return {"status":"ok"}
+
+# Path to your frontend file
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INDEX_PATH = os.path.join(BASE_DIR, "index.html")
+
+@app.get("/")
+def serve_index():
+    if os.path.exists(INDEX_PATH):
+        return FileResponse(INDEX_PATH, media_type="text/html")
+    else:
+        return {"error": "index.html not found"}

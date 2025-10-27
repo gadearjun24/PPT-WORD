@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PPTX to Word Converter - Theme & Separator</title>
+
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.materialdesignicons.com/6.5.95/css/materialdesignicons.min.css">
+
+  <style>
+    :root{
+      --orange-accent:#ff9900;
+      --orange-light:#ffb347;
+      --success-color:#4caf50;
+      --error-color:#f44336;
+      --radius-lg:.75rem;
+    }
+
+    [data-bs-theme="dark"]{
+      --bs-body-bg:#1e1e1e;
+      --bs-body-color:#f1f1f1;
+      --bs-card-bg:#252526;
+      --bs-border-color:#3a3a3a;
+      --bs-text-muted:#b0b0b0;
+      --input-bg:#333;
+      --log-bg:#2b2b2b;
+    }
+
+    [data-bs-theme="light"]{
+      --bs-body-bg:#f8f9fa;
+      --bs-body-color:#212529;
+      --bs-card-bg:#ffffff;
+      --bs-border-color:#dee2e6;
+      --bs-text-muted:#6c757d;
+      --input-bg:#e9ecef;
+      --log-bg:#f1f1f1;
+    }
+
+    body{
+      min-height:100vh;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      padding-top:50px;
+      padding-bottom:50px;
+      background:var(--bs-body-bg);
+      color:var(--bs-body-color);
+      transition:background-color .25s;
+    }
+
+    .converter-card{
+      background:var(--bs-card-bg);
+      border:1px solid var(--bs-border-color);
+      border-radius:var(--radius-lg);
+      box-shadow:0 10px 40px rgba(0,0,0,.2);
+    }
+
+    h1.card-title{ color:var(--orange-accent); font-weight:300; }
+
+    .custom-file-upload{
+      border:2px dashed var(--bs-border-color);
+      background-color:var(--input-bg);
+      padding:22px;
+      border-radius:var(--radius-lg);
+      cursor:pointer;
+      transition:all .2s;
+      color:var(--bs-text-muted);
+      user-select:none;
+    }
+    .custom-file-upload:hover{ border-color:var(--orange-accent); color:var(--orange-accent); }
+
+    .file-icon{ font-size:2.1rem; display:block; margin-bottom:6px; }
+
+    .btn-orange{
+      background-color:var(--orange-accent);
+      border-color:var(--orange-accent);
+      color:var(--bs-body-bg)!important;
+      font-weight:700;
+    }
+    .btn-orange:hover{ background-color:var(--orange-light); border-color:var(--orange-light); }
+
+    #status{ margin-top:16px; padding:14px; border-radius:var(--radius-lg); font-weight:600; min-height:40px; }
+    .status-initial{ background:var(--input-bg); color:var(--bs-text-muted); }
+    .status-loading{ background:var(--orange-accent); color:var(--bs-body-bg); }
+    .status-success{ background:var(--success-color); color:#fff; }
+    .status-error{ background:var(--error-color); color:#fff; }
+
+    .log-area{ background:var(--log-bg); border:1px solid var(--bs-border-color); border-radius:var(--radius-lg); max-height:260px; overflow:auto; padding:16px; }
+    .log-area h2{ color:var(--orange-accent); font-weight:300; margin-top:0; margin-bottom:12px; }
+    #conversionLog{ list-style:none; padding-left:0; margin-bottom:0; }
+    #conversionLog li{ padding:8px 0; border-bottom:1px dashed var(--bs-border-color); font-size:.92rem; display:flex; align-items:flex-start; gap:.6rem; }
+    #conversionLog li:last-child{ border-bottom:none; }
+    .log-time{ color:var(--bs-text-muted); font-size:.78rem; margin-left:auto; }
+    .theme-toggle-container{ position:fixed; top:18px; right:18px; z-index:999; }
+    .small-muted{ font-size:.9rem; color:var(--bs-text-muted); }
+    .separator-note{ font-size:.88rem; color:var(--bs-text-muted); margin-top:6px; }
+  </style>
+</head>
+<body>
+
+  <div class="theme-toggle-container">
+    <div class="form-check form-switch">
+      <input class="form-check-input" type="checkbox" role="switch" id="themeSwitch" aria-label="Toggle theme">
+      <label class="form-check-label small-muted" for="themeSwitch">
+        Theme
+      </label>
+    </div>
+  </div>
+
+  <div class="container my-5">
+    <div class="row justify-content-center">
+      <div class="col-lg-8 col-xl-7">
+
+        <div class="card converter-card p-4 p-md-5 mb-4">
+          <h1 class="card-title text-center mb-3">
+            <span class="mdi mdi-microsoft-powerpoint"></span>
+            PPTX <span class="mdi mdi-arrow-right-bold"></span>
+            DOCX <span class="mdi mdi-microsoft-word"></span>
+          </h1>
+          <p class="text-center small-muted mb-3">
+            Upload a PPTX and get a DOCX with text, tables, images, charts and shapes preserved.
+          </p>
+
+          <form id="uploadForm" class="mb-3" autocomplete="off" novalidate>
+            <div class="mb-3">
+              <input type="file" id="fileInput" accept=".pptx" required hidden aria-label="PPTX file input">
+              <label for="fileInput" id="dropZone" class="custom-file-upload d-flex flex-column align-items-center">
+                <span class="mdi mdi-cloud-upload file-icon" aria-hidden="true"></span>
+                <strong id="fileNameDisplay">Drag & Drop or Click to Select a <code>.pptx</code> file</strong>
+                <div class="small-muted mt-1">Max file size: depends on your server—upload responsibly.</div>
+              </label>
+            </div>
+
+            <div class="row g-2 align-items-center mb-3">
+              <div class="col-8">
+                <label for="slideSeparator" class="form-label small-muted mb-1">Slide separation mode</label>
+                <input type="number" class="form-control" id="slideSeparator" value="0" title="0 = default (2 blank lines), -1 = page break, N>0 = N blank lines">
+                <div class="separator-note">
+  <p><strong>🔹 Line Separation Options:</strong></p>
+  <ul>
+<li><code>0</code> → Adds <strong>no blank lines</strong> between slides (slides appear directly one after another).</li>
+    <li><code>1</code> → Adds <strong>1 blank line</strong> between slides.</li>
+    <li><code>2</code> → Adds <strong>2 blank lines</strong> between slides.</li>
+    <li><code>3</code> → Adds <strong>3 blank lines</strong>, and so on — you can specify any positive number.</li>
+    
+    <li><code>-1</code> → Inserts a <strong>page break</strong> between slides, so each PowerPoint slide starts on a new Word page.</li>
+  </ul>
+  <p style="margin-top: 10px;">
+    💡 <em>Tip:</em> Use <code>-1</code> if you want every PowerPoint slide to start on a <strong>new page</strong> in Word.  
+    Use <code>0</code> for <strong>no spacing</strong>, or a positive number like <code>1</code>–<code>5</code> for flexible blank line spacing.
+  </p>
+</div>
+
+              <div class="col-4 d-grid">
+                <button type="submit" id="convertButton" class="btn btn-orange btn-lg" aria-live="polite" disabled>
+                  <span class="mdi mdi-file-convert me-1"></span> Convert & Download
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <div id="status" class="status-initial text-center">
+            <span class="mdi mdi-power-standby me-1"></span> System ready.
+          </div>
+        </div>
+
+        <div class="card log-area">
+          <h2><span class="mdi mdi-history"></span> Conversion History Log</h2>
+          <ul id="conversionLog" aria-live="polite">
+            <li><span class="mdi mdi-information-outline" style="color:var(--orange-accent)"></span> Application initialized successfully. <span class="log-time">Now</span></li>
+          </ul>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    // ========== CONFIG ==========
+    const API_URL = "/convert"; // <-- change if needed
+
+    // ========== DOM ==========
+    const form = document.getElementById("uploadForm");
+    const fileInput = document.getElementById("fileInput");
+    const dropZone = document.getElementById("dropZone");
+    const fileNameDisplay = document.getElementById("fileNameDisplay");
+    const convertButton = document.getElementById("convertButton");
+    const statusElement = document.getElementById("status");
+    const conversionLog = document.getElementById("conversionLog");
+    const slideSeparatorInput = document.getElementById("slideSeparator");
+    const themeSwitch = document.getElementById("themeSwitch");
+    const htmlEl = document.documentElement;
+
+    // ========== THEME ==========
+    function setInitialTheme(){
+      const stored = localStorage.getItem("theme");
+      const defaultTheme = stored || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      htmlEl.setAttribute("data-bs-theme", defaultTheme);
+      themeSwitch.checked = (defaultTheme === 'dark');
+    }
+    function toggleTheme(){
+      const current = htmlEl.getAttribute("data-bs-theme");
+      const next = current === "dark" ? "light" : "dark";
+      htmlEl.setAttribute("data-bs-theme", next);
+      localStorage.setItem("theme", next);
+    }
+    themeSwitch.addEventListener("change", toggleTheme);
+    setInitialTheme();
+
+    // ========== LOGS ==========
+    function addLogEntry(message, iconClass = "mdi-information-outline", color = "var(--orange-accent)"){
+      const time = new Date().toLocaleTimeString();
+      const li = document.createElement("li");
+      li.innerHTML = `<span class="mdi ${iconClass}" style="color:${color}"></span><span class="text-truncate ms-1">${message}</span><span class="log-time">${time}</span>`;
+      conversionLog.prepend(li);
+      while(conversionLog.children.length > 20) conversionLog.removeChild(conversionLog.lastChild);
+    }
+
+    // ========== STATUS ==========
+    function updateStatus(text, iconClass = "mdi-power-standby", statusClass = "status-initial", disable = false){
+      statusElement.className = `${statusClass} text-center`;
+      statusElement.innerHTML = `<span class="mdi ${iconClass} me-1"></span> ${text}`;
+      convertButton.disabled = disable;
+      if(statusClass === 'status-loading'){
+        convertButton.innerHTML = `<span class="mdi mdi-loading mdi-spin me-1"></span> Processing...`;
+      } else {
+        convertButton.innerHTML = `<span class="mdi mdi-file-convert me-1"></span> Convert & Download`;
+      }
+    }
+
+    // ========== Drag & Drop UX ==========
+    ['dragenter','dragover'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.style.borderColor = "var(--orange-accent)"; });
+    });
+    ['dragleave','drop'].forEach(evt => {
+      dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.style.borderColor = ""; });
+    });
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files && e.dataTransfer.files[0];
+      if(file) {
+        fileInput.files = e.dataTransfer.files;
+        onFileSelected(file);
+      }
+    });
+
+    // ========== File selection ==========
+    fileInput.addEventListener('change', () => {
+      const f = fileInput.files[0];
+      if(f) onFileSelected(f);
+    });
+
+    function onFileSelected(file){
+      const sizeMB = (file.size/(1024*1024)).toFixed(2);
+      fileNameDisplay.innerHTML = `Selected: <strong>${file.name}</strong> (${sizeMB} MB)`;
+      updateStatus(`File ${file.name} ready. Click Convert & Download.`, 'mdi-check-circle-outline', 'status-initial', false);
+      addLogEntry(`Loaded file ${file.name} (${sizeMB} MB).`, 'mdi-file-check-outline', 'var(--orange-accent)');
+    }
+
+    // ========== Form submit ==========
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const file = fileInput.files[0];
+      if(!file){
+        addLogEntry("No file selected", "mdi-alert-circle", "var(--error-color)");
+        return updateStatus("No file selected. Choose a .pptx file.", "mdi-alert-circle", "status-error", false);
+      }
+
+      // read slide separator
+      let slideSeparator = parseInt(slideSeparatorInput.value, 10);
+      if(Number.isNaN(slideSeparator)) slideSeparator = 0;
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        updateStatus("Uploading file...", "mdi-cloud-upload", "status-loading", true);
+        addLogEntry(`Uploading ${file.name}...`, "mdi-cloud-upload", "var(--orange-accent)");
+
+        // append slide_separator as query param
+        const url = `${API_URL}?slide_separator=${encodeURIComponent(slideSeparator)}`;
+
+        // Upload & convert
+        const resp = await fetch(url, { method: "POST", body: formData });
+        if(!resp.ok){
+          let text = await resp.text().catch(()=>null);
+          let msg = text || `${resp.status} ${resp.statusText}`;
+          throw new Error(msg);
+        }
+
+        updateStatus("Conversion complete. Downloading...", "mdi-download", "status-loading", true);
+        addLogEntry("Conversion finished on server. Downloading file...", "mdi-download-circle", "var(--success-color)");
+
+        const blob = await resp.blob();
+        const originalName = file.name.replace(/\.[^/.]+$/, "");
+        const filename = `${originalName}_converted_${Date.now()}.docx`;
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(link.href);
+
+        updateStatus(`Download complete: ${filename}`, "mdi-check-all", "status-success", false);
+        addLogEntry(`Downloaded ${filename}`, "mdi-download", "var(--success-color)");
+
+        // reset
+        fileInput.value = "";
+        fileNameDisplay.innerHTML = "Drag & Drop or Click to Select a <code>.pptx</code> file";
+        setTimeout(()=> updateStatus("Select a PPTX file to begin conversion.", "mdi-folder-open", "status-initial", true), 2500);
+
+      } catch(err){
+        console.error("Conversion error:", err);
+        updateStatus("Conversion failed. See logs.", "mdi-alert-circle", "status-error", false);
+        addLogEntry(`ERROR: ${err.message}`, "mdi-alert-octagon", "var(--error-color)");
+      }
+    });
+
+    // initial state
+    updateStatus("Select a PPTX file to begin conversion.", "mdi-folder-open", "status-initial", true);
+  </script>
+</body>
+</html>

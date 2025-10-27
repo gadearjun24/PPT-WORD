@@ -374,15 +374,20 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                     logger.warning(f"Shape render failed: {e}")
 
             # Slide separation: 2 blank lines
-            doc.add_paragraph("")
-            doc.add_paragraph("")
+            # -------------------------
             # Handle slide separation logic
+            # -------------------------
             if slide_separator == -1:
+                # New page for each slide
                 doc.add_page_break()
+            elif slide_separator == 0:
+                # No extra spacing between slides
+                pass
             else:
-                line_count = slide_separator if slide_separator > 0 else 2
-                for _ in range(line_count):
+                # Add N blank lines between slides
+                for _ in range(slide_separator):
                     doc.add_paragraph("")
+
 
         # Save Word
         out_path = f"/tmp/{uuid.uuid4()}.docx"

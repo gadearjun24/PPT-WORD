@@ -15,6 +15,8 @@ from docx import Document
 from docx.shared import Pt, RGBColor as DocxRGB, Inches
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
+from pptx.oxml.ns import qn
+
 
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
@@ -369,7 +371,6 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                                 continue
                 
                             # === Bullet + numbering detection (robust, XML-safe) ===
-                            from pptx.oxml.ns import qn
                             bullet_prefix = ""
                             try:
                                 pPr = getattr(para._p, "pPr", None)

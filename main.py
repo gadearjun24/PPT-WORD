@@ -368,40 +368,49 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                             if not raw_para_text.strip():
                                 continue
                 
-                            # Safely detect bullet/numbering: do NOT access .numPr directly
+                            # === Bullet + numbering detection (robust, XML-safe) ===
+                            from pptx.oxml.ns import qn
                             bullet_prefix = ""
                             try:
-                                # para.level exists in python-pptx, use it to indent
-                                level = getattr(para, "level", 0)
-                                if level and isinstance(level, int) and level > 0:
-                                    bullet_prefix += "    " * level
-                            except Exception:
-                                level = 0
+                                pPr = getattr(para._p, "pPr", None)
+                                if pPr is not None:
+                                    # 1️⃣ Regular bullet (•, ○, –, →)
+                                    buChar = pPr.find(qn("a:buChar"))
+                                    if buChar is not None:
+                                        ch = buChar.get("char", "•")
+                                        bullet_prefix += ch + " "
                 
+                                    # 2️⃣ Numbered list (1., i., etc.)
+                                    elif pPr.find(qn("a:buAutoNum")) is not None:
+                                        bullet_prefix += "1. "
+                
+                                    # 3️⃣ No bullet explicitly set
+                                    elif pPr.find(qn("a:buNone")) is not None:
+                                        bullet_prefix = ""
+                            except Exception as e:
+                                logger.debug(f"Bullet detection failed: {e}")
+                
+                            # Add indent based on PowerPoint paragraph level
                             try:
-                                pPr = getattr(para._p, "pPr", None)  # CT_TextParagraphProperties or None
-                                if pPr is not None and getattr(pPr, "numPr", None) is not None:
-                                    # has numbering properties — show a bullet/number placeholder
-                                    # we can't reliably reconstruct the exact numbering symbol without additional logic,
-                                    # but putting a bullet keeps the list structure visible
-                                    bullet_prefix += "• "
+                                level = getattr(para, "level", 0)
+                                if isinstance(level, int) and level > 0:
+                                    bullet_prefix = ("    " * level) + bullet_prefix
                             except Exception:
-                                # defensive: skip bullet detection if object shape differs
                                 pass
                 
-                            # Build paragraph in docx using runs, but sanitize text beforehand
+                            # === Paragraph creation with styling and safe text ===
                             p = doc.add_paragraph()
                             first_run = True
                             for run in para.runs:
                                 run_text = run.text or ""
                                 run_text = sanitize_text(run_text)
-                                if run_text == "":
+                                if not run_text.strip():
                                     continue
-                                # include bullet prefix on the first run only
+                
                                 final_text = (bullet_prefix + run_text) if first_run else run_text
                                 try:
                                     r = p.add_run(final_text)
-                                    # preserve basic styling where possible
+                                    # --- Preserve font styling ---
                                     try:
                                         r.font.name = default_font_name
                                         r.font.size = Pt(14)
@@ -412,15 +421,17 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                                         if rgb:
                                             r.font.color.rgb = rgb
                                     except Exception as e:
-                                        logger.debug(f"run styling skipped: {e}")
+                                        logger.debug(f"Run styling skipped: {e}")
                                 except Exception as e:
-                                    # extremely defensive: if adding a run fails, append sanitized plain text
+                                    # fallback: sanitize and retry text insertion
                                     safe_text = sanitize_text(final_text)
                                     try:
                                         p.add_run(safe_text)
                                     except Exception as e2:
                                         logger.error(f"Failed to add run even after sanitizing: {e2}")
+                
                                 first_run = False
+                
                 except Exception as e:
                     logger.warning(f"Text extraction failed (fallback): {e}")
                     # fallback: add sanitized whole shape text
@@ -430,6 +441,7 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                             doc.add_paragraph(fallback_text)
                     except Exception as e2:
                         logger.error(f"Failed fallback text insertion: {e2}")
+
 
                 
 

@@ -362,7 +362,7 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                 #         doc.add_paragraph(text)
 
                 # 
-                # Text (with robust bullets + sanitization)
+                # Text (with robust bullets + sanitization
                 try:
                     if hasattr(shape, "text_frame") and shape.has_text_frame:
                         for para in shape.text_frame.paragraphs:
@@ -370,48 +370,53 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                             if not raw_para_text.strip():
                                 continue
                 
-                            # === Bullet + numbering detection (robust, XML-safe) ===
-                            bullet_prefix = ""
+                            # --- Detect bullet or numbering type safely ---
+                            list_style = None
                             try:
                                 pPr = getattr(para._p, "pPr", None)
                                 if pPr is not None:
-                                    # 1️⃣ Regular bullet (•, ○, –, →)
+                                    # Regular bullet (•, ○, –, →)
                                     buChar = pPr.find(qn("a:buChar"))
                                     if buChar is not None:
-                                        ch = buChar.get("char", "•")
-                                        bullet_prefix += ch + " "
+                                        list_style = "List Bullet"
                 
-                                    # 2️⃣ Numbered list (1., i., etc.)
+                                    # Numbered list (1., i., etc.)
                                     elif pPr.find(qn("a:buAutoNum")) is not None:
-                                        bullet_prefix += "1. "
+                                        list_style = "List Number"
                 
-                                    # 3️⃣ No bullet explicitly set
+                                    # No bullet explicitly set
                                     elif pPr.find(qn("a:buNone")) is not None:
-                                        bullet_prefix = ""
+                                        list_style = None
                             except Exception as e:
                                 logger.debug(f"Bullet detection failed: {e}")
                 
-                            # Add indent based on PowerPoint paragraph level
+                            # --- Choose Word paragraph style ---
+                            if list_style == "List Bullet":
+                                p = doc.add_paragraph(style="List Bullet")
+                            elif list_style == "List Number":
+                                p = doc.add_paragraph(style="List Number")
+                            else:
+                                p = doc.add_paragraph()
+                
+                            # --- Apply indentation level (PowerPoint nesting) ---
                             try:
                                 level = getattr(para, "level", 0)
                                 if isinstance(level, int) and level > 0:
-                                    bullet_prefix = ("    " * level) + bullet_prefix
-                            except Exception:
-                                pass
+                                    # Each level adds 0.5 cm indentation
+                                    p.paragraph_format.left_indent = Inches(0.2 * level)
+                            except Exception as e:
+                                logger.debug(f"Indentation failed: {e}")
                 
-                            # === Paragraph creation with styling and safe text ===
-                            p = doc.add_paragraph()
-                            first_run = True
+                            # --- Add text runs (with styling + sanitization) ---
                             for run in para.runs:
                                 run_text = run.text or ""
                                 run_text = sanitize_text(run_text)
                                 if not run_text.strip():
                                     continue
                 
-                                final_text = (bullet_prefix + run_text) if first_run else run_text
                                 try:
-                                    r = p.add_run(final_text)
-                                    # --- Preserve font styling ---
+                                    r = p.add_run(run_text)
+                                    # Preserve styling
                                     try:
                                         r.font.name = default_font_name
                                         r.font.size = Pt(14)
@@ -421,28 +426,24 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                                         rgb = pptx_color_to_rgb(run.font.color)
                                         if rgb:
                                             r.font.color.rgb = rgb
-                                    except Exception as e:
-                                        logger.debug(f"Run styling skipped: {e}")
-                                except Exception as e:
-                                    # fallback: sanitize and retry text insertion
-                                    safe_text = sanitize_text(final_text)
-                                    try:
-                                        p.add_run(safe_text)
-                                    except Exception as e2:
-                                        logger.error(f"Failed to add run even after sanitizing: {e2}")
+                                    except Exception as style_err:
+                                        logger.debug(f"Run styling skipped: {style_err}")
                 
-                                first_run = False
+                                except Exception as e:
+                                    # fallback if font fails
+                                    try:
+                                        p.add_run(sanitize_text(run_text))
+                                    except Exception as e2:
+                                        logger.error(f"Failed to add sanitized run: {e2}")
                 
                 except Exception as e:
                     logger.warning(f"Text extraction failed (fallback): {e}")
-                    # fallback: add sanitized whole shape text
                     try:
                         fallback_text = sanitize_text(safe_get_text(shape))
                         if fallback_text:
                             doc.add_paragraph(fallback_text)
                     except Exception as e2:
                         logger.error(f"Failed fallback text insertion: {e2}")
-
 
                 
 

@@ -313,14 +313,45 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                 logger.info(f"Shape {sh_i}/{len(slide.shapes)} type={shape.shape_type}")
 
                 # Text
+                # text = safe_get_text(shape).strip()
+                # if text and hasattr(shape, "text_frame") and shape.has_text_frame:
+                #     try:
+                #         for para in shape.text_frame.paragraphs:
+                #             if not para.text.strip(): continue
+                #             p = doc.add_paragraph()
+                #             for run in para.runs:
+                #                 r = p.add_run(run.text)
+                #                 try:
+                #                     r.font.name = default_font_name
+                #                     r.font.size = Pt(14)
+                #                     r.bold = run.font.bold
+                #                     r.italic = run.font.italic
+                #                     r.underline = run.font.underline
+                #                     rgb = pptx_color_to_rgb(run.font.color)
+                #                     if rgb: r.font.color.rgb = rgb
+                #                 except: pass
+                #     except:
+                #         doc.add_paragraph(text)
+
+                # Text (with bullet and indentation)
                 text = safe_get_text(shape).strip()
                 if text and hasattr(shape, "text_frame") and shape.has_text_frame:
                     try:
                         for para in shape.text_frame.paragraphs:
-                            if not para.text.strip(): continue
+                            if not para.text.strip():
+                                continue
+                            bullet_prefix = ""
+                            if para.level > 0:
+                                bullet_prefix = "    " * para.level
+                            # detect if bullet or numbered list
+                            if para._p.pPr is not None and para._p.pPr.numPr is not None:
+                                bullet_prefix += "• "
+                            elif para.text_frame.text_frame_properties is not None and para.text_frame.text_frame_properties.numbered:
+                                bullet_prefix += "• "
+                
                             p = doc.add_paragraph()
                             for run in para.runs:
-                                r = p.add_run(run.text)
+                                r = p.add_run(f"{bullet_prefix}{run.text}" if run == para.runs[0] else run.text)
                                 try:
                                     r.font.name = default_font_name
                                     r.font.size = Pt(14)
@@ -328,10 +359,14 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                                     r.italic = run.font.italic
                                     r.underline = run.font.underline
                                     rgb = pptx_color_to_rgb(run.font.color)
-                                    if rgb: r.font.color.rgb = rgb
-                                except: pass
-                    except:
+                                    if rgb:
+                                        r.font.color.rgb = rgb
+                                except Exception as e:
+                                    logger.debug(f"Font styling failed: {e}")
+                    except Exception as e:
+                        logger.warning(f"Text extraction failed: {e}")
                         doc.add_paragraph(text)
+
 
                 # Table
                 try:
@@ -349,14 +384,27 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
 
                 except: pass
 
+                # # Image
+                # try:
+                #     if shape.shape_type == MSO_SHAPE_TYPE.PICTURE or hasattr(shape,"image") or "blip" in str(shape.element.xml):
+                #         try:
+                #             img_bytes = extract_image_from_shape(shape)
+                #             doc.add_picture(BytesIO(img_bytes), width=Inches(4))
+                #         except: pass
+                # except: pass
                 # Image
                 try:
-                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE or hasattr(shape,"image") or "blip" in str(shape.element.xml):
+                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE or hasattr(shape, "image") or "blip" in str(shape.element.xml):
                         try:
                             img_bytes = extract_image_from_shape(shape)
-                            doc.add_picture(BytesIO(img_bytes), width=Inches(4))
-                        except: pass
-                except: pass
+                            width_in = emu_to_inches(shape.width)
+                            height_in = emu_to_inches(shape.height)
+                            doc.add_picture(BytesIO(img_bytes), width=Inches(width_in), height=Inches(height_in))
+                            logger.info(f"Inserted image with original size: {width_in:.2f} x {height_in:.2f} inches")
+                        except Exception as e:
+                            logger.warning(f"Image extraction failed: {e}")
+                except Exception as e:
+                    logger.debug(f"Image block error: {e}")
 
                 # Chart
                 try:

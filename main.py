@@ -45,6 +45,32 @@ app.add_middleware(
 # Helpers
 # -------------------------
 
+def sanitize_text(s: str) -> str:
+    """
+    Remove control characters that break python-docx (e.g. NUL, other C0 controls).
+    Keep common whitespace (space, tab, newline).
+    """
+    if s is None:
+        return ""
+    # Replace NULL bytes and other C0 controls except \n, \r, \t
+    clean_chars = []
+    removed = 0
+    for ch in s:
+        code = ord(ch)
+        if code == 0:
+            removed += 1
+            continue
+        # allow printable + common whitespace
+        if code >= 32 or ch in ("\n", "\r", "\t"):
+            clean_chars.append(ch)
+        else:
+            removed += 1
+    clean = "".join(clean_chars)
+    if removed:
+        logger.debug(f"sanitize_text: removed {removed} control chars")
+    return clean
+
+
 def safe_filename(name: str) -> str:
     name = unicodedata.normalize("NFKD", name)
     name = re.sub(r"[^\w\-_. ]", "_", name)
@@ -333,39 +359,79 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                 #     except:
                 #         doc.add_paragraph(text)
 
-                # Text (with bullet and indentation)
-                text = safe_get_text(shape).strip()
-                if text and hasattr(shape, "text_frame") and shape.has_text_frame:
-                    try:
+                # 
+                # Text (with robust bullets + sanitization)
+                try:
+                    if hasattr(shape, "text_frame") and shape.has_text_frame:
                         for para in shape.text_frame.paragraphs:
-                            if not para.text.strip():
+                            raw_para_text = para.text or ""
+                            if not raw_para_text.strip():
                                 continue
-                            bullet_prefix = ""
-                            if para.level > 0:
-                                bullet_prefix = "    " * para.level
-                            # detect if bullet or numbered list
-                            if para._p.pPr is not None and para._p.pPr.numPr is not None:
-                                bullet_prefix += "• "
-                            elif para.text_frame.text_frame_properties is not None and para.text_frame.text_frame_properties.numbered:
-                                bullet_prefix += "• "
                 
+                            # Safely detect bullet/numbering: do NOT access .numPr directly
+                            bullet_prefix = ""
+                            try:
+                                # para.level exists in python-pptx, use it to indent
+                                level = getattr(para, "level", 0)
+                                if level and isinstance(level, int) and level > 0:
+                                    bullet_prefix += "    " * level
+                            except Exception:
+                                level = 0
+                
+                            try:
+                                pPr = getattr(para._p, "pPr", None)  # CT_TextParagraphProperties or None
+                                if pPr is not None and getattr(pPr, "numPr", None) is not None:
+                                    # has numbering properties — show a bullet/number placeholder
+                                    # we can't reliably reconstruct the exact numbering symbol without additional logic,
+                                    # but putting a bullet keeps the list structure visible
+                                    bullet_prefix += "• "
+                            except Exception:
+                                # defensive: skip bullet detection if object shape differs
+                                pass
+                
+                            # Build paragraph in docx using runs, but sanitize text beforehand
                             p = doc.add_paragraph()
+                            first_run = True
                             for run in para.runs:
-                                r = p.add_run(f"{bullet_prefix}{run.text}" if run == para.runs[0] else run.text)
+                                run_text = run.text or ""
+                                run_text = sanitize_text(run_text)
+                                if run_text == "":
+                                    continue
+                                # include bullet prefix on the first run only
+                                final_text = (bullet_prefix + run_text) if first_run else run_text
                                 try:
-                                    r.font.name = default_font_name
-                                    r.font.size = Pt(14)
-                                    r.bold = run.font.bold
-                                    r.italic = run.font.italic
-                                    r.underline = run.font.underline
-                                    rgb = pptx_color_to_rgb(run.font.color)
-                                    if rgb:
-                                        r.font.color.rgb = rgb
+                                    r = p.add_run(final_text)
+                                    # preserve basic styling where possible
+                                    try:
+                                        r.font.name = default_font_name
+                                        r.font.size = Pt(14)
+                                        r.bold = bool(run.font.bold)
+                                        r.italic = bool(run.font.italic)
+                                        r.underline = bool(run.font.underline)
+                                        rgb = pptx_color_to_rgb(run.font.color)
+                                        if rgb:
+                                            r.font.color.rgb = rgb
+                                    except Exception as e:
+                                        logger.debug(f"run styling skipped: {e}")
                                 except Exception as e:
-                                    logger.debug(f"Font styling failed: {e}")
-                    except Exception as e:
-                        logger.warning(f"Text extraction failed: {e}")
-                        doc.add_paragraph(text)
+                                    # extremely defensive: if adding a run fails, append sanitized plain text
+                                    safe_text = sanitize_text(final_text)
+                                    try:
+                                        p.add_run(safe_text)
+                                    except Exception as e2:
+                                        logger.error(f"Failed to add run even after sanitizing: {e2}")
+                                first_run = False
+                except Exception as e:
+                    logger.warning(f"Text extraction failed (fallback): {e}")
+                    # fallback: add sanitized whole shape text
+                    try:
+                        fallback_text = sanitize_text(safe_get_text(shape))
+                        if fallback_text:
+                            doc.add_paragraph(fallback_text)
+                    except Exception as e2:
+                        logger.error(f"Failed fallback text insertion: {e2}")
+
+                
 
 
                 # Table

@@ -302,7 +302,7 @@ def draw_shape_as_image(shape):
 # Main endpoint
 # -------------------------
 @app.post("/convert/")
-async def convert(file: UploadFile = File(...),slide_separator: int = 0):
+async def convert(file: UploadFile = File(...), slide_separator: int = 0, use_line: int 0):
     try:
         original_filename = file.filename or "uploaded.pptx"
         safe_name = safe_filename(os.path.splitext(original_filename)[0])
@@ -516,6 +516,23 @@ async def convert(file: UploadFile = File(...),slide_separator: int = 0):
                         logger.info(f"Rendered and inserted shape: {shape.shape_type}")
                 except Exception as e:
                     logger.warning(f"Shape render failed: {e}")
+
+            # Handle use line logic
+
+            # 2️⃣ Apply separation only if not the last slide
+            if s_i < len(prs.slides):
+                if use_line == 1:
+                    # Draw horizontal divider line(s)
+                    p = doc.add_paragraph()
+                    p.alignment = 1  # Centered
+                    run = p.add_run("_" * 40)
+                    run.bold = True
+                    run.font.size = Pt(12)
+                    run.font.name = default_font_name
+
+
+
+            
 
             # Slide separation: 2 blank lines
             # -------------------------

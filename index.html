@@ -133,7 +133,8 @@
             </div>
 
             <div class="row g-2 align-items-center mb-3">
-              <div class="col-8">
+               <!-- Slide Separator Input -->
+              <div class="col-md-5">
                 <label for="slideSeparator" class="form-label small-muted mb-1">Slide separation mode</label>
                 <input type="number" class="form-control" id="slideSeparator" value="0" title="0 = default (2 blank lines), -1 = page break, N>0 = N blank lines">
                 <div class="separator-note">
@@ -151,6 +152,17 @@
     Use <code>0</code> for <strong>no spacing</strong>, or a positive number like <code>1</code>–<code>5</code> for flexible blank line spacing.
   </p>
 </div>
+
+
+                  <!-- Use Line Input -->
+  <div class="col-md-3">
+    <label for="useLine" class="form-label small-muted mb-1">Use separator line</label>
+    <input type="number" class="form-control" id="useLine" value="0" min="0" max="1" title="0 = No line, 1 = Add horizontal line">
+    <div class="separator-note">Enter <code>1</code> to add a horizontal line separator; <code>0</code> for none.</div>
+  </div>
+
+                
+  <!-- Convert Button -->
 
               <div class="col-4 d-grid">
                 <button type="submit" id="convertButton" class="btn btn-orange btn-lg" aria-live="polite" disabled>
@@ -278,9 +290,10 @@
       try {
         updateStatus("Uploading file...", "mdi-cloud-upload", "status-loading", true);
         addLogEntry(`Uploading ${file.name}...`, "mdi-cloud-upload", "var(--orange-accent)");
+        const useLine = parseInt(document.getElementById("useLine").value, 10) || 0;
 
         // append slide_separator as query param
-        const url = `${API_URL}?slide_separator=${encodeURIComponent(slideSeparator)}`;
+        const url = `${API_URL}?slide_separator=${encodeURIComponent(slideSeparator)}&use_line=${encodeURIComponent(useLine)}`;
 
         // Upload & convert
         const resp = await fetch(url, { method: "POST", body: formData });

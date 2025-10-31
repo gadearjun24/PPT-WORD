@@ -525,7 +525,7 @@ async def convert(file: UploadFile = File(...), slide_separator: int = 0, use_li
                     # Draw horizontal divider line(s)
                     p = doc.add_paragraph()
                     p.alignment = 1  # Centered
-                    run = p.add_run("_" * 40)
+                    run = p.add_run("_" * 100)
                     run.bold = True
                     run.font.size = Pt(12)
                     run.font.name = default_font_name

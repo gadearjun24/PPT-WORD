@@ -574,20 +574,29 @@ async def convert(file: UploadFile = File(...), slide_separator: int = 0, use_li
 @app.get("/health")
 def health(): return {"status":"ok"}
 
-# Path to your frontend file
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INDEX_PATH = os.path.join(BASE_DIR, "index.html")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
+# ✅ Mount static directory (for CSS, JS, images, favicon, etc.)
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+else:
+    logger.warning("⚠️ Static directory not found — skipping mount")
+
+# ✅ Serve favicon.ico
+@app.get("/favicon.ico")
+async def favicon():
+    favicon_path = os.path.join(STATIC_DIR, "favicon.png")
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path, media_type="image/png")
+    logger.warning("⚠️ Favicon not found — returning 404")
+    return JSONResponse({"error": "favicon not found"}, status_code=404)
+
+# ✅ Serve main frontend (index.html)
 @app.get("/")
 def serve_index():
     if os.path.exists(INDEX_PATH):
         return FileResponse(INDEX_PATH, media_type="text/html")
     else:
-        return {"error": "index.html not found"}
-
-
-app.mount("/static", StaticFiles(directory="static"), name="static")
-
-@app.get("/favicon.ico")
-async def favicon():
-    return FileResponse("static/favicon.png", media_type="image/png")
+        return JSONResponse({"error": "index.html not found"}, status_code=404)

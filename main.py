@@ -584,3 +584,10 @@ def serve_index():
         return FileResponse(INDEX_PATH, media_type="text/html")
     else:
         return {"error": "index.html not found"}
+
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/favicon.ico")
+async def favicon():
+    return FileResponse("static/favicon.png", media_type="image/png")

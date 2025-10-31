@@ -67,6 +67,7 @@
       transition:all .2s;
       color:var(--bs-text-muted);
       user-select:none;
+      text-align:center;
     }
     .custom-file-upload:hover{ border-color:var(--orange-accent); color:var(--orange-accent); }
 
@@ -95,6 +96,14 @@
     .theme-toggle-container{ position:fixed; top:18px; right:18px; z-index:999; }
     .small-muted{ font-size:.9rem; color:var(--bs-text-muted); }
     .separator-note{ font-size:.88rem; color:var(--bs-text-muted); margin-top:6px; }
+
+    /* Responsive improvement */
+    @media (max-width: 768px){
+      .row.g-2 > [class*="col-"] {
+        flex: 0 0 100%;
+        max-width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
@@ -132,39 +141,35 @@
               </label>
             </div>
 
-            <div class="row g-2 align-items-center mb-3">
-               <!-- Slide Separator Input -->
+            <div class="row g-2 align-items-start mb-3">
+              
+              <!-- Slide Separator Input -->
               <div class="col-md-5">
                 <label for="slideSeparator" class="form-label small-muted mb-1">Slide separation mode</label>
                 <input type="number" class="form-control" id="slideSeparator" value="0" title="0 = default (2 blank lines), -1 = page break, N>0 = N blank lines">
                 <div class="separator-note">
-  <p><strong>🔹 Line Separation Options:</strong></p>
-  <ul>
-<li><code>0</code> → Adds <strong>no blank lines</strong> between slides (slides appear directly one after another).</li>
-    <li><code>1</code> → Adds <strong>1 blank line</strong> between slides.</li>
-    <li><code>2</code> → Adds <strong>2 blank lines</strong> between slides.</li>
-    <li><code>3</code> → Adds <strong>3 blank lines</strong>, and so on — you can specify any positive number.</li>
-    
-    <li><code>-1</code> → Inserts a <strong>page break</strong> between slides, so each PowerPoint slide starts on a new Word page.</li>
-  </ul>
-  <p style="margin-top: 10px;">
-    💡 <em>Tip:</em> Use <code>-1</code> if you want every PowerPoint slide to start on a <strong>new page</strong> in Word.  
-    Use <code>0</code> for <strong>no spacing</strong>, or a positive number like <code>1</code>–<code>5</code> for flexible blank line spacing.
-  </p>
-</div>
+                  <p><strong>🔹 Line Separation Options:</strong></p>
+                  <ul>
+                    <li><code>0</code> → Adds <strong>no blank lines</strong> between slides.</li>
+                    <li><code>1</code> → Adds <strong>1 blank line</strong>.</li>
+                    <li><code>2</code> → Adds <strong>2 blank lines</strong>.</li>
+                    <li><code>-1</code> → Inserts a <strong>page break</strong> between slides.</li>
+                  </ul>
+                </div>
+              </div>
 
+              <!-- Use Line Dropdown -->
+              <div class="col-md-3">
+                <label for="useLine" class="form-label small-muted mb-1">Use separator line</label>
+                <select class="form-select" id="useLine" title="0 = No line, 1 = Add horizontal line">
+                  <option value="0" selected>No line</option>
+                  <option value="1">Add line</option>
+                </select>
+                <div class="separator-note">Select <code>1</code> to add a horizontal line separator.</div>
+              </div>
 
-                  <!-- Use Line Input -->
-  <div class="col-md-3">
-    <label for="useLine" class="form-label small-muted mb-1">Use separator line</label>
-    <input type="number" class="form-control" id="useLine" value="0" min="0" max="1" title="0 = No line, 1 = Add horizontal line">
-    <div class="separator-note">Enter <code>1</code> to add a horizontal line separator; <code>0</code> for none.</div>
-  </div>
-
-                
-  <!-- Convert Button -->
-
-              <div class="col-4 d-grid">
+              <!-- Convert Button -->
+              <div class="col-md-4 d-grid mt-3 mt-md-0">
                 <button type="submit" id="convertButton" class="btn btn-orange btn-lg" aria-live="polite" disabled>
                   <span class="mdi mdi-file-convert me-1"></span> Convert & Download
                 </button>
@@ -292,10 +297,8 @@
         addLogEntry(`Uploading ${file.name}...`, "mdi-cloud-upload", "var(--orange-accent)");
         const useLine = parseInt(document.getElementById("useLine").value, 10) || 0;
 
-        // append slide_separator as query param
         const url = `${API_URL}?slide_separator=${encodeURIComponent(slideSeparator)}&use_line=${encodeURIComponent(useLine)}`;
 
-        // Upload & convert
         const resp = await fetch(url, { method: "POST", body: formData });
         if(!resp.ok){
           let text = await resp.text().catch(()=>null);
@@ -320,7 +323,6 @@
         updateStatus(`Download complete: ${filename}`, "mdi-check-all", "status-success", false);
         addLogEntry(`Downloaded ${filename}`, "mdi-download", "var(--success-color)");
 
-        // reset
         fileInput.value = "";
         fileNameDisplay.innerHTML = "Drag & Drop or Click to Select a <code>.pptx</code> file";
         setTimeout(()=> updateStatus("Select a PPTX file to begin conversion.", "mdi-folder-open", "status-initial", true), 2500);
@@ -332,7 +334,6 @@
       }
     });
 
-    // initial state
     updateStatus("Select a PPTX file to begin conversion.", "mdi-folder-open", "status-initial", true);
   </script>
 </body>

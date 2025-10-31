@@ -7,7 +7,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-
+from fastapi.staticfiles import StaticFiles
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 

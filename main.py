@@ -302,7 +302,7 @@ def draw_shape_as_image(shape):
 # Main endpoint
 # -------------------------
 @app.post("/convert/")
-async def convert(file: UploadFile = File(...), slide_separator: int = 0, use_line: int 0):
+async def convert(file: UploadFile = File(...), slide_separator: int = 0, use_line: int = 0):
     try:
         original_filename = file.filename or "uploaded.pptx"
         safe_name = safe_filename(os.path.splitext(original_filename)[0])
